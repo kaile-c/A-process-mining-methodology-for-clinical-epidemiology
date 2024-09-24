@@ -1,0 +1,190 @@
+## data preprocess step.
+##Process Mining Analysis Using bupaR
+##This script performs a process mining analysis using the bupaverse package on an event log dataset. The code creates process maps based on relative and absolute case frequencies for the entire dataset and for specific groups.
+
+##Steps:
+##Load Libraries:
+
+##buparverse: For process mining.
+##dplyr: For data manipulation.
+##Create Event Log:
+
+##Define the event log with columns for case ID, activity ID, activity instance ID, lifecycle, timestamp, and resource ID.
+##Generate Process Map for All Data:
+
+##Create a process map that shows:
+##Relative frequency of cases (type = relative-case).
+##Absolute frequency of cases (sec = absolute-case).
+##Layout direction (rankdir = 'LR').
+##Generate Process Map for Group 'H2B':
+
+##Filter the data for group "H2B".
+##Create the same process map as above but only for this group.
+##Generate Process Map for Group 'PPI':
+
+##Filter the data for group "PPI".
+##Create the same process map as above but only for this group.
+Code:
+# Load necessary libraries
+library(bupaRverse)
+library(dplyr)
+
+# Define the event log
+event_log <- bupaR::eventlog(eventlog = dataset, 
+                             case_id = "ID",
+                             activity_id = "event",
+                             activity_instance_id = "act_id",
+                             lifecycle_id = "lifecycle",
+                             timestamp = "eventdate",
+                             resource_id = "group")
+
+# Generate process map for the entire dataset
+event_log %>%
+  process_map(type = frequency("relative-case"),
+              sec = frequency("absolute-case"),
+              rankdir = 'LR')
+
+# Generate process map for group 'H2B'
+event_log %>%
+  filter(group == 'H2B') %>%
+  process_map(type = frequency("relative-case"),
+              sec = frequency("absolute-case"),
+              rankdir = 'LR')
+
+# Generate process map for group 'PPI'
+event_log %>%
+  filter(group == 'PPI') %>%
+  process_map(type = frequency("relative-case"),
+              sec = frequency("absolute-case"),
+              rankdir = 'LR')
+
+
+##Multistate Modeling Using msm Package
+##This script fits a continuous-time multistate model using the msm package in R, accounting for time-dependent covariates, comorbidities, and drugs. It also compares multiple models using log-likelihood and AIC values.
+
+##Steps:
+##Load the msm Package:
+
+##msm: For fitting multistate models.
+##Define Transition Intensity Matrix (qmatrix):
+
+##A 3x3 matrix is created where q (0.1) represents transition rates between states.
+##The model allows transitions from state 1 to states 2 and 3, and from state 2 to state 3.
+##Fit the Multistate Model (pm.msm):
+
+##The response variable state_combine is modeled as a function of time (duration) for each subject (ID).
+##Covariates include group, age group, base stage, gender, comorbidities, and drugs.
+##Death (state 3) is treated as an absorbing state with exact time of death.
+##Censoring is handled by defining state 99 as a censored state.
+##gen.inits = TRUE generates initial estimates automatically.
+##A custom optimization control setting (fnscale=4000) is used.
+##Compare Multiple Models:
+
+##Log-likelihood values are extracted for three models (pm.msm, pm.msm2, pm.msm3).
+##AIC values are computed to compare the models.
+##The results (log-likelihood and AIC) are combined and displayed.
+Code:
+# Load necessary package
+library(msm)
+
+# Define transition intensity matrix
+q <- 0.1
+s <- rbind(
+  c(q, q, q),
+  c(0, 0, q),
+  c(0, 0, 0)
+)
+
+# Fit the multistate model with time-dependent covariates and drugs
+pm.msm <- msm(state_combine ~ duration,
+              subject = ID,
+              data = dataset,
+              qmatrix = s,
+              covariates = ~ group + age_group + base_stage + female + d1 + d2 + d3 + d4 + drug1 + drug2 + drug3,
+              deathexact = 3,      # Death is treated as an absorbing state
+              censor = 99,         # Censoring state
+              censor.states = c(1, 2, 3),
+              gen.inits = TRUE,    # Generate initial values
+              control = list(fnscale = 4000)  # Optimization control
+)
+
+# Compare models using log-likelihood and AIC
+logliks <- c(logLik(pm.msm), logLik(pm.msm2), logLik(pm.msm3))
+aics <- AIC(pm.msm, pm.msm2, pm.msm3)
+cbind(logliks, aics)
+
+##Testing the Markov Assumption Using msm Package
+##This script tests the Markov assumption by comparing two multistate models:
+
+##A Markov model that assumes transition rates depend only on the current state.
+##A semi-Markov model that allows transition rates to depend on the time spent in the current state (sojourn time).
+##A likelihood ratio test (LRT) is used to determine if the semi-Markov model provides a significantly better fit than the Markov model. If the semi-Markov model fits better, it suggests that the Markov assumption is violated.
+
+##Steps:
+##Fit the Traditional Markov Model:
+
+##The Markov model is fit to the data assuming that the future state transitions depend solely on the current state and not on how long the individual has been in that state.
+##Prepare Data with Sojourn Time:
+
+##The time spent in each state (sojourn time) is calculated for each individual using the lead() function.
+##Fit the Semi-Markov Model:
+
+##The semi-Markov model is fit using the same structure as the Markov model but includes the sojourn time as a covariate, allowing transition rates to depend on the time spent in the current state.
+##Perform the Likelihood Ratio Test (LRT):
+
+##The LRT compares the log-likelihoods of the Markov and semi-Markov models. A significant p-value (p < 0.05) indicates that the semi-Markov model fits the data better, and the Markov assumption can be rejected.
+Code:
+# Load necessary libraries
+library(msm)
+ 
+# Define transition intensity matrix
+q <- 0.1
+s <- rbind(
+  c(q, q, q),
+  c(0, 0, q),
+  c(0, 0, 0)
+)
+
+# Fit the traditional Markov model
+msm_model_markov <- msm(state_combine ~ duration,
+                        subject = ID,
+                        data = dataset,
+                        qmatrix = s,
+                        deathexact = 3,
+                        censor = 99,
+                        censor.states = c(1, 2, 3),
+                        gen.inits = TRUE,
+                        control = list(fnscale = 4000)
+)
+
+# Prepare data with sojourn time
+test_markov <- dataset %>%
+  group_by(lopnr) %>%
+  mutate(sojourn_time = lead(day, default = first(day)))
+
+# Fit the semi-Markov model with sojourn time
+msm_model_sojourn <- msm(state_combine ~ duration,
+                         subject = lopnr,
+                         data = test_markov,
+                         qmatrix = s,
+                         deathexact = 3,
+                         censor = 99,
+                         censor.states = c(1, 2, 3),
+                         covariates = ~ sojourn_time,
+                         gen.inits = TRUE,
+                         control = list(fnscale = 4000)
+)
+
+# Perform likelihood ratio test to compare models
+lrtest <- -2 * (logLik(msm_model_markov) - logLik(msm_model_sojourn))
+df_sojourn <- attr(logLik(msm_model_sojourn), "df")
+df_markov <- attr(logLik(msm_model_markov), "df")
+df_diff <- df_sojourn - df_markov
+p_value <- 1 - pchisq(lrtest, df = df_diff)
+
+# Output result of the likelihood ratio test
+if (p_value < 0.05) {
+  cat("Reject Markov assumption (p =", p_value, ")\n")
+} else {
+  cat("Fail to reject Markov assumption (p =", p_value, ")\n")
+}
